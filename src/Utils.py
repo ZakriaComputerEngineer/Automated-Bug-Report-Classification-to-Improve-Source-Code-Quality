@@ -121,7 +121,6 @@ def get_training_args(config: dict, prog_dir) -> TrainingArguments:
                 output_dir="./results",
                 eval_strategy="steps",        # Changed from evaluation_strategy to eval_strategy
                 eval_steps=config['training']['eval_steps'],
-                save_steps=config['training']['save_steps'],
                 learning_rate=config['training']['learning_rate'],
                 per_device_train_batch_size=config['training']['per_device_train_batch_size'],
                 per_device_eval_batch_size=config['training']['per_device_eval_batch_size'],
