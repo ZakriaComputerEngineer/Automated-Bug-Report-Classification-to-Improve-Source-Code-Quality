@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # trainning on multiple datasets
 # in a progressive manner
-def train_progressive(config: dict):
+def train_Continual(config: dict):
     """Train the model progressively on multiple datasets."""
     try:
         dataset_files = get_dataset_files(config['data']['data_dir'], logger)
@@ -86,7 +86,7 @@ def train_progressive(config: dict):
             model = trainer.model
             
     except Exception as e:
-        logger.error(f"Progressive training failed: {str(e)}")
+        logger.error(f"Continual training failed: {str(e)}")
         raise
 
 
@@ -162,9 +162,9 @@ def main():
         os.makedirs(config["training"]['results_plots'], exist_ok=True)
         os.makedirs(config["training"]['results_logs'], exist_ok=True)
         
-        if config['training']['learning'] == 'progressive':
+        if config['training']['learning'] == 'Continual':
             os.makedirs(config['training']['progressive_save_dir'], exist_ok=True)
-            train_progressive(config)
+            train_Continual(config)
         else:
             train_combined(config)
             
