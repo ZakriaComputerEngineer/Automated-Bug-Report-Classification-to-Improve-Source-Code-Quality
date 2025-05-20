@@ -6,7 +6,7 @@ model:
 
 
 training:
-  learning: 'progressive'
+  learning: 'Continual'
   progressive_save_dir: "./progressive_save"
   output_dir: "./results"
   results_models: "./results/models"
