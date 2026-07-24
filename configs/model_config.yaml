@@ -39,10 +39,16 @@ training:
   lr_scheduler_type: "cosine"
   warmup_steps: 500
   metric_for_best_model: "f1"
+  remove_unused_columns: false
+  dataloader_drop_last: false
+  overwrite_output_dir: true
 
 data:
+  data_dir: "./data"          # directory holding the project CSVs
   max_length: 512
   train_val_split: 0.8
+  train_test_split: 0.2       # validation fraction used by create_datasets
+  progressive_save_dir: "./progressive_save"
   random_seed: 42
   dataloader_drop_last: false
   dataloader_shuffle: true
@@ -56,4 +62,20 @@ testing:
   individual_save_dir: ",/results/individual_testing"
   results_path: "./results/individual_testing"
   logs_path: "./results/logs"
-  
+
+# Code-pretrained model comparison (set training.learning: 'CodeModels').
+# CodeT5 is a T5 encoder-decoder: fp16 diverges, so it uses bf16 (fp32 on non-Ampere
+# GPUs) and a smaller batch because it needs more memory than the encoders.
+code_models:
+  num_labels: 2
+  models:
+    - name: "microsoft/graphcodebert-base"
+      precision: "fp16"
+      batch_size: 128
+    - name: "microsoft/unixcoder-base"
+      precision: "fp16"
+      batch_size: 128
+    - name: "Salesforce/codet5-base"
+      precision: "bf16"
+      batch_size: 32
+

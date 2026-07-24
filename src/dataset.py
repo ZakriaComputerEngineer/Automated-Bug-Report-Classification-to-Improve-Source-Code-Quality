@@ -4,6 +4,10 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from transformers import AutoTokenizer
 from typing import List, Tuple
+try:
+    from .Utils import load_tokenizer
+except ImportError:  # allow running as a plain module
+    from Utils import load_tokenizer
 
 class BugReportDataset(Dataset):
     def __init__(self, encodings, labels):
@@ -20,22 +24,26 @@ class BugReportDataset(Dataset):
 
 
 
-def create_datasets(df: pd.DataFrame, config: dict, logger, task='training') -> Tuple[BugReportDataset, BugReportDataset]:
-    """Create train and validation datasets from DataFrame."""
+def create_datasets(df: pd.DataFrame, config: dict, logger, task='training', model_name: str = None) -> Tuple[BugReportDataset, BugReportDataset]:
+    """Create train and validation datasets from DataFrame.
+
+    `model_name` optionally overrides the tokenizer checkpoint (used by the
+    code-model comparison so each model tokenizes with its own vocabulary).
+    """
     try:
         train_texts, val_texts, train_labels, val_labels = train_test_split(
             df["text"].tolist(),
             df["label"].tolist(),
-            test_size=config['data']['train_test_split'],
+            test_size=config['data'].get('train_test_split', 0.2),
             random_state=config['data']['random_seed']
         )
 
         if task == 'training':
             logger.info(f"Training on {len(train_texts)} samples and validating on {len(val_texts)} samples.")
-            tokenizer = AutoTokenizer.from_pretrained(config['model']['name'])
+            tokenizer = load_tokenizer(model_name or config['model']['name'])
         else:
             logger.info(f"Testing on {len(val_texts)} samples.")
-            tokenizer = AutoTokenizer.from_pretrained(config['testing']['trained_model_path'])
+            tokenizer = load_tokenizer(config['testing']['trained_model_path'])
         
         train_encodings = tokenizer(
             train_texts, 

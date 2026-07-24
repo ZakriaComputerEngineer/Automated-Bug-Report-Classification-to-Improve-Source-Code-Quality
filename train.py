@@ -150,6 +150,64 @@ def train_combined(config: dict):
 
 
 
+# training each code-pretrained model individually per project
+def train_code_models(config: dict):
+    """Fine-tune each code-pretrained model (e.g. GraphCodeBERT, UniXcoder, CodeT5)
+    individually on every project dataset, with per-model precision and batch size.
+    CodeT5 is a T5 encoder-decoder and must be trained in bf16 (fp16 diverges);
+    it also uses a smaller batch as it needs more GPU memory."""
+    try:
+        dataset_files = get_dataset_files(config['data']['data_dir'], logger)
+        specs = config['code_models']['models']
+        num_labels = config['code_models'].get('num_labels', config['model']['num_labels'])
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        for spec in specs:
+            name = spec['name']
+            precision = spec.get('precision', 'fp16')
+            batch = spec.get('batch_size')
+            logger.info(f"\n===== Code model: {name} (precision={precision}, batch={batch}) =====")
+
+            for file_path in dataset_files:
+                dataset_name = Path(file_path).stem
+                out_dir = os.path.join(config['training']['results_models'],
+                                       f"{Path(name).name}__{dataset_name}")
+                os.makedirs(out_dir, exist_ok=True)
+
+                df = load_and_preprocess_dataset(file_path, logger)
+                train_dataset, val_dataset = create_datasets(df, config, logger, model_name=name)
+
+                model = AutoModelForSequenceClassification.from_pretrained(name, num_labels=num_labels)
+                # some checkpoints lack a pad id on the config; borrow eos if needed
+                if getattr(model.config, "pad_token_id", None) is None:
+                    model.config.pad_token_id = getattr(model.config, "eos_token_id", 0)
+                model = model.to(device)
+
+                training_args = get_training_args(config, out_dir, precision=precision, batch_size=batch)
+                trainer = Trainer(
+                    model=model,
+                    args=training_args,
+                    train_dataset=train_dataset,
+                    eval_dataset=val_dataset,
+                    compute_metrics=compute_metrics,
+                )
+                trainer.train()
+                metrics = trainer.evaluate()
+                logger.info(f"{name} / {dataset_name}: {metrics}")
+                trainer.save_model(os.path.join(out_dir, 'model'))
+
+                # free GPU memory before the next (model, dataset)
+                del model, trainer
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+    except Exception as e:
+        logger.error(f"Code-model training failed: {str(e)}")
+        raise
+
+
+
+
 # Main function to load config and start training
 def main():
     try:
@@ -162,9 +220,12 @@ def main():
         os.makedirs(config["training"]['results_plots'], exist_ok=True)
         os.makedirs(config["training"]['results_logs'], exist_ok=True)
         
-        if config['training']['learning'] == 'Continual':
+        learning = config['training']['learning']
+        if learning == 'Continual':
             os.makedirs(config['training']['progressive_save_dir'], exist_ok=True)
             train_Continual(config)
+        elif learning == 'CodeModels':
+            train_code_models(config)
         else:
             train_combined(config)
             

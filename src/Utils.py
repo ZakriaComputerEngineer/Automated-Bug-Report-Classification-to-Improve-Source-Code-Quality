@@ -8,7 +8,7 @@ from sklearn.utils import resample
 from typing import List
 import os
 import glob
-from transformers import TrainingArguments
+from transformers import TrainingArguments, AutoTokenizer
 
 nltk.download('stopwords')
 nltk.download('punkt')
@@ -89,7 +89,8 @@ def balance_dataset(df):
 
     print(f"\n Total Samples of balanced data: {len(df_balanced)}")
     print("\n Class Distribution of balanced:\n", df_balanced['label'].value_counts())
-    
+    return df_balanced
+
 def load_and_preprocess_dataset(file_path: str, logger) -> pd.DataFrame:
     """Load and preprocess a single dataset file."""
     try:
@@ -114,30 +115,59 @@ def get_dataset_files(data_dir: str, logger) -> List[str]:
         logger.error(f"Error accessing data directory: {str(e)}")
         raise
     
-def get_training_args(config: dict, prog_dir) -> TrainingArguments:
-    """Get training arguments from the config."""
+def load_tokenizer(model_name: str):
+    """Load a tokenizer with fallbacks for legacy checkpoints.
+
+    Some code checkpoints (e.g. Salesforce/codet5-base) ship a large
+    additional_special_tokens list in an old format that newer `tokenizers`
+    versions reject ("Input must be a List[Union[str, AddedToken]]"). Those
+    sentinel tokens are not needed for classification, so we retry without them.
+    """
+    last_err = None
+    for kwargs in ({}, {"additional_special_tokens": []},
+                   {"use_fast": False, "additional_special_tokens": []}):
+        try:
+            return AutoTokenizer.from_pretrained(model_name, **kwargs)
+        except Exception as e:
+            last_err = e
+    raise RuntimeError(f"Could not load tokenizer for {model_name}: {last_err}")
+
+
+def get_training_args(config: dict, prog_dir, precision: str = None,
+                      batch_size: int = None) -> TrainingArguments:
+    """Build TrainingArguments from config.
+
+    precision: 'fp16' or 'bf16' (per-model; CodeT5 needs bf16/fp32 to avoid NaNs).
+    batch_size: optional per-device batch-size override (e.g. smaller for CodeT5).
+    """
+    t = config['training']
     try:
+        train_bs = batch_size or t['per_device_train_batch_size']
+        eval_bs = batch_size or t['per_device_eval_batch_size']
         training_args = TrainingArguments(
-                output_dir="./results",
-                eval_strategy="steps",        # Changed from evaluation_strategy to eval_strategy
-                eval_steps=config['training']['eval_steps'],
-                learning_rate=config['training']['learning_rate'],
-                per_device_train_batch_size=config['training']['per_device_train_batch_size'],
-                per_device_eval_batch_size=config['training']['per_device_eval_batch_size'],
-                num_train_epochs=config['training']['num_train_epochs'],
-                weight_decay=config['training']['weight_decay'],
-                label_smoothing_factor=config['training']['label_smoothing_factor'],
-                max_grad_norm=config['training']['max_grad_norm'],
-                lr_scheduler_type=config['training']['lr_scheduler_type'],
-                warmup_steps=config['training']['warmup_steps'],
+                output_dir=prog_dir or t.get('output_dir', './results'),
+                eval_strategy="epoch",
+                save_strategy="epoch",
+                learning_rate=t['learning_rate'],
+                per_device_train_batch_size=train_bs,
+                per_device_eval_batch_size=eval_bs,
+                num_train_epochs=t['num_train_epochs'],
+                weight_decay=t['weight_decay'],
+                label_smoothing_factor=t['label_smoothing_factor'],
+                max_grad_norm=t['max_grad_norm'],
+                lr_scheduler_type=t['lr_scheduler_type'],
+                warmup_steps=t['warmup_steps'],
                 logging_dir=os.path.join('results', 'logs'),
-                logging_steps=config['training']['logging_steps'],
-                load_best_model_at_end=config['training']['load_best_model_at_end'],
-                metric_for_best_model=config['training']['metric_for_best_model'],
-                greater_is_better=config['training']['greater_is_better'],
-                remove_unused_columns=config['training']['remove_unused_columns'],
-                dataloader_drop_last=config['training']['dataloader_drop_last'],    # Added to handle last batch
-                overwrite_output_dir=config['training']['overwrite_output_dir']      # Added to allow overwriting existing results
+                logging_steps=t['logging_steps'],
+                load_best_model_at_end=t['load_best_model_at_end'],
+                metric_for_best_model=t['metric_for_best_model'],
+                greater_is_better=t['greater_is_better'],
+                fp16=(precision == 'fp16'),
+                bf16=(precision == 'bf16'),
+                remove_unused_columns=t.get('remove_unused_columns', False),
+                dataloader_drop_last=t.get('dataloader_drop_last', False),
+                overwrite_output_dir=t.get('overwrite_output_dir', True),
+                report_to="none",
             )
         return training_args
     except KeyError as e:
